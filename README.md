@@ -441,6 +441,24 @@ predictions are exported alongside it under
 `outputs/experiments/task44_learned_comparison/`. Use a distinct `--output-dir`
 to preserve an earlier run.
 
+### Task 55 Qwen validation
+
+Task 55 found that Qwen2.5-7B-Instruct is Apache 2.0 licensed and provides an
+official GPTQ-Int4 variant. A Colab Tesla T4 successfully ran its NF4 4-bit
+inference smoke test (1.67 seconds; 5.19 GiB peak PyTorch-allocated VRAM).
+There is still no demonstrated research need to justify integration, so
+Qwen/QLoRA remains deferred. The full run details and limitations are in
+`outputs/reports/task55_qwen_validation.md`.
+
+### Task 56 opt-in Qwen/QLoRA integration
+
+The optional 4-bit inference and prompt helpers are implemented in
+`src/llm/qwen_wrapper.py` and `src/llm/prompt_templates.py`. The LoRA-only
+training entry point is `src/training/train_qlora.py`; it is not invoked by the
+baseline or SELR paths and requires separate Transformers, Accelerate,
+Datasets, PEFT, and bitsandbytes dependencies plus a CUDA GPU. Core adoption
+remains gated by a predeclared answer or explanation comparison.
+
 Verify the controlled tiny CPU learning check without a GPU:
 
 ```powershell

@@ -4,7 +4,50 @@ import zipfile
 import pytest
 
 from src.ingestion.json_loader import load_icews14_facts
+from src.ingestion.csv_loader import (
+    load_timelinekgqa_facts,
+    load_timelinekgqa_questions,
+    validate_timelinekgqa_dataset,
+)
 from src.ingestion.preprocess import preprocess_facts
+
+
+def test_load_timelinekgqa_facts_and_questions_normalizes_splits(tmp_path):
+    facts_path = tmp_path / "kg.csv"
+    questions_path = tmp_path / "questions.json"
+    facts_path.write_text(
+        "id,subject,predicate,object,start_time,end_time\n"
+        "1,Alpha,met,Beta,2014-01-01,2014-01-02\n",
+        encoding="utf-8",
+    )
+    questions_path.write_text(
+        json.dumps(
+            [
+                {
+                    "id": "10",
+                    "source_kg_id": "1",
+                    "question": "Who did Alpha meet?",
+                    "answer": "Beta",
+                    "answer_type": "entity",
+                    "split": "dev",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    facts = load_timelinekgqa_facts(facts_path)
+    questions = load_timelinekgqa_questions(questions_path)
+    summary = validate_timelinekgqa_dataset(facts_path, questions_path)
+
+    assert facts[0]["subject_id"] == "Alpha"
+    assert facts[0]["start_time"] == "2014-01-01"
+    assert facts[0]["end_time"] == "2014-01-02"
+    assert questions[0]["split"] == "validation"
+    assert questions[0]["source_id"] == "TimelineKGQA:question:10"
+    assert summary["fact_count"] == 1
+    assert summary["split_counts"]["validation"] == 1
+    assert summary["entity_answers_supported"] is True
 
 
 def _write_metadata(path):

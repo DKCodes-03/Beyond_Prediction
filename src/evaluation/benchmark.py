@@ -11,6 +11,15 @@ from src.evaluation.metrics import compute_answer_metrics
 from src.evaluation.path_baseline import graph_path_sanity_baseline
 from src.graph.graph_builder import build_temporal_graph
 
+# Re-export the isolated optional-integration benchmark so existing benchmark
+# entry points can discover it without making core evaluation depend on it.
+from src.evaluation.integration_benchmark import (  # noqa: E402
+    benchmark_adopted_integrations,
+    benchmark_icews18_transfer,
+    benchmark_optional_integrations,
+    run_integration_benchmark,
+)
+
 
 _SPLITS = frozenset({"train", "validation", "test"})
 

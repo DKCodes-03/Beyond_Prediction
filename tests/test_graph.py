@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from src.graph.graph_builder import build_temporal_graph
+from src.graph.neo4j_interface import Neo4jInterface
 from src.ingestion.preprocess import preprocess_facts
 
 
@@ -176,3 +177,107 @@ def test_temporal_graph_rejects_conflicting_fact_ids():
 
     with pytest.raises(ValueError, match="conflicting duplicate fact_id"):
         build_temporal_graph([fact, {**fact, "object_id": "entity_c"}])
+
+
+class _FakeResult:
+    def __init__(self, records=None):
+        self.records = records or []
+
+    def __iter__(self):
+        return iter(self.records)
+
+    def consume(self):
+        return None
+
+
+class _FakeSession:
+    def __init__(self, records=None):
+        self.records = records
+        self.calls = []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, traceback):
+        return None
+
+    def run(self, query, parameters=None):
+        self.calls.append((query, parameters or {}))
+        if "MATCH (subject:Entity)" in query:
+            return _FakeResult(self.records or [])
+        return _FakeResult([{"ok": 1}])
+
+
+class _FakeDriver:
+    def __init__(self, records=None):
+        self.fake_session = _FakeSession(records)
+        self.closed = False
+
+    def session(self, **kwargs):
+        return self.fake_session
+
+    def verify_connectivity(self):
+        return None
+
+    def close(self):
+        self.closed = True
+
+
+def test_neo4j_interface_requires_explicit_credentials_and_preserves_graph():
+    with pytest.raises(ValueError, match="URI is required"):
+        Neo4jInterface()
+
+    fixture = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
+    graph = build_temporal_graph(fixture["facts"])
+    driver = _FakeDriver()
+    adapter = Neo4jInterface(
+        uri="bolt://localhost:7687",
+        username="neo4j",
+        password="test-password",
+        database="neo4j",
+        driver=driver,
+    )
+
+    assert adapter.persist_temporal_graph(graph) == graph.fact_count
+    assert "UNWIND $facts AS fact" in driver.fake_session.calls[-1][0]
+    assert len(driver.fake_session.calls[-1][1]["facts"]) == graph.fact_count
+    assert adapter.verify_connectivity() is True
+    adapter.close()
+    assert driver.closed is True
+
+
+def test_neo4j_interface_loads_filtered_persisted_facts():
+    records = [
+        {
+            "fact_id": "f_ab",
+            "subject_id": "entity_a",
+            "relation_id": "relation_1",
+            "object_id": "entity_b",
+            "timestamp": "2014-01-01",
+            "source_id": "fixture",
+        }
+    ]
+    driver = _FakeDriver(records)
+    adapter = Neo4jInterface(
+        uri="bolt://localhost:7687",
+        username="neo4j",
+        password="test-password",
+        driver=driver,
+    )
+
+    facts = adapter.query_facts(
+        cutoff="2014-01-31",
+        relation_id="relation_1",
+        subject_id="entity_a",
+    )
+
+    assert facts == records
+    query, parameters = driver.fake_session.calls[-1]
+    assert "edge.timestamp <= $cutoff" in query
+    assert "edge.relation_id = $relation_id" in query
+    assert "subject.id = $subject_id" in query
+    assert parameters == {
+        "cutoff": "2014-01-31",
+        "relation_id": "relation_1",
+        "subject_id": "entity_a",
+    }
