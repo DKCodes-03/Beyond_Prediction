@@ -1,0 +1,48 @@
+# Schema: ../schemas/configs.schema.json#/$defs/dataset_config
+schema_version: 1
+
+dataset:
+  id: ICEWS14
+  source: huggingface:linxy/ICEWS14
+  revision: 462141693b1c9c2ece49384fab41955eae89471a
+  checksum_sha256: 0bf107f5413221fef3703f5025814015d8e329d2fe31ca8446f06561a0b17c77
+  license: "TFLEX card: Apache-2.0; ICEWS source: Harvard Dataverse restricted terms (research/education only, non-commercial)"
+
+task:
+  type: historical_temporal_qa
+  evidence_policy: closed_knowledge_base
+  cutoff_operator: on_or_before
+  cutoff_inclusive: true
+  all_facts_available_to_all_splits: true
+  label_usage:
+    train: fit
+    validation: model_selection
+    test: final_evaluation_only
+
+qa_generation:
+  kind: synthetic_graph_derived
+  direction: subject_to_object
+  deterministic: true
+  cutoff_policy: latest_supporting_fact_date
+  templates:
+    - id: one_hop
+      hops: 1
+    - id: two_hop
+      hops: 2
+  answer_policy: all_unique_reachable_endpoint_ids
+  require_nonempty_answers: true
+  store_witness_path: true
+
+splits:
+  strategy: deterministic_grouped_random
+  group_by: query_path_signature
+  seed: 17
+  fractions:
+    train: 0.8
+    validation: 0.1
+    test: 0.1
+
+paths:
+  raw_dir: data/raw/icews14
+  processed_dir: data/processed
+  splits_dir: data/splits

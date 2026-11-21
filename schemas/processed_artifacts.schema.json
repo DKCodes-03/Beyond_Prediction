@@ -1,0 +1,123 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Processed artifact manifest",
+  "description": "Versioned provenance manifest for canonical facts and QA split files.",
+  "type": "object",
+  "properties": {
+    "manifest_schema": { "const": "processed_artifacts.schema.json" },
+    "schema_version": { "const": 1 },
+    "dataset": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "source": { "type": "string", "minLength": 1 },
+        "revision": { "type": ["string", "null"] },
+        "source_checksum_sha256": {
+          "anyOf": [
+            { "type": "null" },
+            { "type": "string", "pattern": "^[0-9a-fA-F]{64}$" }
+          ]
+        }
+      },
+      "required": ["id", "source", "revision", "source_checksum_sha256"],
+      "additionalProperties": false
+    },
+    "record_schemas": {
+      "type": "object",
+      "properties": {
+        "facts": { "const": "data_contracts.schema.json#/$defs/fact" },
+        "qa": { "const": "data_contracts.schema.json#/$defs/qa_record" }
+      },
+      "required": ["facts", "qa"],
+      "additionalProperties": false
+    },
+    "artifacts": {
+      "type": "object",
+      "properties": {
+        "facts": { "$ref": "#/$defs/artifact" },
+        "splits": {
+          "type": "object",
+          "properties": {
+            "train": { "$ref": "#/$defs/split_artifact" },
+            "validation": { "$ref": "#/$defs/split_artifact" },
+            "test": { "$ref": "#/$defs/split_artifact" }
+          },
+          "required": ["train", "validation", "test"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["facts", "splits"],
+      "additionalProperties": false
+    },
+    "split_provenance": {
+      "type": "object",
+      "properties": {
+        "strategy": { "const": "deterministic_grouped_random" },
+        "group_by": { "const": "query_path_signature" },
+        "seed": { "type": "integer", "minimum": 0 },
+        "fractions": {
+          "type": "object",
+          "properties": {
+            "train": { "type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1 },
+            "validation": { "type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1 },
+            "test": { "type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1 }
+          },
+          "required": ["train", "validation", "test"],
+          "additionalProperties": false
+        },
+        "evidence_policy": { "const": "closed_knowledge_base" },
+        "label_usage": {
+          "type": "object",
+          "properties": {
+            "train": { "const": "fit" },
+            "validation": { "const": "model_selection" },
+            "test": { "const": "final_evaluation_only" }
+          },
+          "required": ["train", "validation", "test"],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "strategy",
+        "group_by",
+        "seed",
+        "fractions",
+        "evidence_policy",
+        "label_usage"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "manifest_schema",
+    "schema_version",
+    "dataset",
+    "record_schemas",
+    "artifacts",
+    "split_provenance"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "artifact": {
+      "type": "object",
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "record_count": { "type": "integer", "minimum": 1 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      },
+      "required": ["path", "record_count", "sha256"],
+      "additionalProperties": false
+    },
+    "split_artifact": {
+      "type": "object",
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "record_count": { "type": "integer", "minimum": 1 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "qa_ids_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      },
+      "required": ["path", "record_count", "sha256", "qa_ids_sha256"],
+      "additionalProperties": false
+    }
+  }
+}

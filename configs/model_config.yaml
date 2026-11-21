@@ -1,0 +1,21 @@
+# Schema: ../schemas/configs.schema.json#/$defs/model_config
+schema_version: 1
+
+# Begin with the matched non-SELR baseline; switch variant only for SELR runs.
+variant: baseline
+
+encoder:
+  type: entity_relation_time_embeddings
+  embedding_dim: 64
+  aggregation: mean
+  dropout: 0.1
+
+answer_head:
+  type: candidate_scoring
+  candidate_policy: retrieved_entities
+  max_candidates: 128
+
+selr:
+  enabled: false
+  latent_dim: 64
+  max_steps: 3

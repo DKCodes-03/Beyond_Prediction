@@ -1,0 +1,23 @@
+# Schema: ../schemas/configs.schema.json#/$defs/retrieval_config
+schema_version: 1
+
+strategy: relation_constrained_bfs
+max_hops: 2
+max_nodes: 128
+max_edges: 256
+
+temporal_filter:
+  operator: on_or_before
+  cutoff_source: qa_record
+
+missing_entity_policy: explicit_retrieval_miss
+empty_result_policy: explicit_retrieval_miss
+
+cache:
+  enabled: true
+  key_fields:
+    - dataset_version
+    - graph_version
+    - split
+    - query
+    - settings

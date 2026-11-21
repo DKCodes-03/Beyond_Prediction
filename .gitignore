@@ -218,3 +218,25 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Local research data and generated experiment artifacts
+/data/raw/**
+!/data/raw/**/
+!/data/raw/**/.gitkeep
+/data/processed/**
+!/data/processed/**/
+!/data/processed/**/.gitkeep
+/data/splits/**
+!/data/splits/
+!/data/splits/.gitkeep
+/checkpoints/**
+!/checkpoints/**/
+!/checkpoints/**/.gitkeep
+/outputs/**
+!/outputs/**/
+!/outputs/**/.gitkeep
+
+# Planning and project documentation
+/tasks.md
+/project_details.md
+/plan.md

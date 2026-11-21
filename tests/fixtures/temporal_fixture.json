@@ -1,0 +1,71 @@
+{
+  "fixture_id": "tiny_temporal_graph_v1",
+  "facts": [
+    {
+      "fact_id": "f_ab",
+      "subject_id": "entity_a",
+      "relation_id": "relation_1",
+      "object_id": "entity_b",
+      "timestamp": "2014-01-01",
+      "source_id": "fixture"
+    },
+    {
+      "fact_id": "f_bc",
+      "subject_id": "entity_b",
+      "relation_id": "relation_2",
+      "object_id": "entity_c",
+      "timestamp": "2014-01-02",
+      "source_id": "fixture"
+    },
+    {
+      "fact_id": "f_ad",
+      "subject_id": "entity_a",
+      "relation_id": "relation_1",
+      "object_id": "entity_d",
+      "timestamp": "2014-01-03",
+      "source_id": "fixture"
+    },
+    {
+      "fact_id": "f_de",
+      "subject_id": "entity_d",
+      "relation_id": "relation_2",
+      "object_id": "entity_e",
+      "timestamp": "2014-01-04",
+      "source_id": "fixture"
+    }
+  ],
+  "queries": [
+    {
+      "query_id": "two_hop_before_boundary",
+      "seed_entity_id": "entity_a",
+      "relation_sequence": ["relation_1", "relation_2"],
+      "cutoff_date": "2014-01-01",
+      "expected_paths": [],
+      "expected_answer_ids": []
+    },
+    {
+      "query_id": "two_hop_at_boundary",
+      "seed_entity_id": "entity_a",
+      "relation_sequence": ["relation_1", "relation_2"],
+      "cutoff_date": "2014-01-02",
+      "expected_paths": [["f_ab", "f_bc"]],
+      "expected_answer_ids": ["entity_c"]
+    },
+    {
+      "query_id": "two_hop_after_boundary",
+      "seed_entity_id": "entity_a",
+      "relation_sequence": ["relation_1", "relation_2"],
+      "cutoff_date": "2014-01-04",
+      "expected_paths": [["f_ab", "f_bc"], ["f_ad", "f_de"]],
+      "expected_answer_ids": ["entity_c", "entity_e"]
+    },
+    {
+      "query_id": "missing_evidence",
+      "seed_entity_id": "entity_unobserved",
+      "relation_sequence": ["relation_1", "relation_2"],
+      "cutoff_date": "2014-01-04",
+      "expected_paths": [],
+      "expected_answer_ids": []
+    }
+  ]
+}

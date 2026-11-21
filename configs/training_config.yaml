@@ -1,0 +1,26 @@
+# Schema: ../schemas/configs.schema.json#/$defs/training_config
+schema_version: 1
+
+model_variant: baseline
+objective: answer_only
+seed: 17
+device: cpu
+deterministic: true
+num_threads: 2
+max_epochs: 10
+batch_size: 16
+max_steps: 2000
+max_runtime_seconds: 900
+num_workers: 0
+
+optimizer:
+  name: adamw
+  learning_rate: 0.001
+  weight_decay: 0.0001
+
+validation:
+  every_epochs: 1
+  early_stopping_patience: 3
+
+checkpoint_dir: checkpoints/best_models
+log_dir: outputs/logs

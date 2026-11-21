@@ -1,0 +1,608 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Beyond Prediction data contracts",
+  "description": "Reusable record definitions for temporal facts, QA, retrieved subgraphs, model outputs, and experiment runs.",
+  "$defs": {
+    "fact": {
+      "type": "object",
+      "description": "A canonical, day-granularity temporal knowledge-graph fact.",
+      "properties": {
+        "fact_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Stable identifier for this fact."
+        },
+        "subject_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Canonical entity identifier for the subject."
+        },
+        "relation_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Canonical relation identifier."
+        },
+        "object_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Canonical entity identifier for the object."
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date",
+          "description": "Normalized ISO 8601 calendar date (YYYY-MM-DD)."
+        },
+        "source_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Identifier for the source dataset record."
+        }
+      },
+      "required": [
+        "fact_id",
+        "subject_id",
+        "relation_id",
+        "object_id",
+        "timestamp",
+        "source_id"
+      ],
+      "additionalProperties": false
+    },
+    "qa_record": {
+      "type": "object",
+      "description": "A historical temporal QA instance; answers are canonical entity IDs.",
+      "properties": {
+        "qa_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "question": {
+          "type": "string",
+          "minLength": 1
+        },
+        "seed_entity_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "relation_sequence": {
+          "type": "array",
+          "description": "Ordered canonical relation IDs for the directed one- or two-hop query.",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1,
+          "maxItems": 2
+        },
+        "temporal_constraint": {
+          "type": "object",
+          "properties": {
+            "operator": {
+              "const": "on_or_before"
+            },
+            "cutoff_date": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          "required": [
+            "operator",
+            "cutoff_date"
+          ],
+          "additionalProperties": false
+        },
+        "accepted_answer_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "split": {
+          "enum": [
+            "train",
+            "validation",
+            "test"
+          ],
+          "description": "Assigned by the later split-generation step; omitted in unsplit QA preparation output."
+        },
+        "provenance": {
+          "type": "object",
+          "description": "Origin of the question and labels, such as a dataset label or a synthetic template.",
+          "properties": {
+            "source": {
+              "type": "string",
+              "minLength": 1
+            },
+            "source_record_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "template_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "supporting_fact_ids": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "uniqueItems": true
+            }
+          },
+          "required": [
+            "source"
+          ],
+          "additionalProperties": false
+        },
+        "supporting_path_fact_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1,
+          "description": "Optional ordered fact IDs for one graph-verified supporting path."
+        }
+      },
+      "required": [
+        "qa_id",
+        "question",
+        "seed_entity_ids",
+        "relation_sequence",
+        "temporal_constraint",
+        "accepted_answer_ids",
+        "provenance"
+      ],
+      "additionalProperties": false
+    },
+    "retrieved_subgraph": {
+      "type": "object",
+      "description": "The bounded evidence and query context supplied to a model for one QA instance.",
+      "properties": {
+        "example_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "qa_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "graph_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Graph dataset/version identifier."
+        },
+        "query_context": {
+          "type": "object",
+          "properties": {
+            "question": {
+              "type": "string",
+              "minLength": 1
+            },
+            "seed_entity_ids": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "minItems": 1,
+              "uniqueItems": true
+            },
+            "temporal_constraint": {
+              "$ref": "#/$defs/qa_record/properties/temporal_constraint"
+            }
+          },
+          "required": [
+            "question",
+            "seed_entity_ids",
+            "temporal_constraint"
+          ],
+          "additionalProperties": false
+        },
+        "facts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/fact"
+          },
+          "description": "May be empty; an empty retrieval is an explicit retrieval miss."
+        },
+        "entity_id_map": {
+          "type": "object",
+          "description": "Maps subgraph-local entity IDs to canonical graph entity IDs.",
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "candidate_answer_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "retrieval_settings": {
+          "type": "object",
+          "properties": {
+            "strategy": {
+              "type": "string",
+              "minLength": 1
+            },
+            "max_hops": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "max_nodes": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "max_edges": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "strategy",
+            "max_hops",
+            "max_nodes",
+            "max_edges"
+          ],
+          "additionalProperties": false
+        },
+        "retrieval_status": {
+          "enum": [
+            "ok",
+            "missing_entity",
+            "empty_result"
+          ],
+          "description": "Distinguishes successful retrieval, absent seed entities, and present seeds with no matching evidence."
+        },
+        "missing_entity_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true,
+          "description": "Query seeds that are not present in the graph."
+        },
+        "limits_applied": {
+          "type": "boolean",
+          "description": "Whether node or edge limits excluded otherwise eligible evidence."
+        }
+      },
+      "required": [
+        "example_id",
+        "qa_id",
+        "graph_id",
+        "query_context",
+        "facts",
+        "entity_id_map",
+        "candidate_answer_ids",
+        "retrieval_settings",
+        "retrieval_status",
+        "missing_entity_ids",
+        "limits_applied"
+      ],
+      "additionalProperties": false
+    },
+    "explanation_target": {
+      "type": "object",
+      "description": "A train-only explanation target grounded in a temporally valid graph path.",
+      "properties": {
+        "qa_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "answer_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "split": {
+          "const": "train",
+          "description": "Explanation targets are generated only from training QA supervision."
+        },
+        "target_text": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Deterministic canonical-ID path text for the bounded explanation decoder."
+        },
+        "supporting_path": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/fact"
+          },
+          "minItems": 1,
+          "description": "Ordered facts on the path from a query seed to the answer."
+        },
+        "provenance": {
+          "type": "object",
+          "properties": {
+            "source": {
+              "const": "temporal_graph_path"
+            },
+            "qa_provenance": {
+              "type": "object"
+            },
+            "fact_ids": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "minItems": 1
+            },
+            "source_ids": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "minItems": 1
+            },
+            "temporal_constraint": {
+              "$ref": "#/$defs/qa_record/properties/temporal_constraint"
+            }
+          },
+          "required": [
+            "source",
+            "qa_provenance",
+            "fact_ids",
+            "source_ids",
+            "temporal_constraint"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "qa_id",
+        "answer_id",
+        "split",
+        "target_text",
+        "supporting_path",
+        "provenance"
+      ],
+      "additionalProperties": false
+    },
+    "model_output": {
+      "type": "object",
+      "description": "Answer-only prediction contract. Explanation text is deferred to Phase 4.",
+      "properties": {
+        "qa_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "model_variant": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "enum": [
+            "ok",
+            "retrieval_miss",
+            "no_candidates",
+            "model_error"
+          ]
+        },
+        "predicted_answer_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "answer_scores": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "answer_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "score": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "answer_id",
+              "score"
+            ],
+            "additionalProperties": false
+          },
+          "uniqueItems": true
+        },
+        "latent_states": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            }
+          },
+          "description": "Optional serialized latent state vectors; dimensions are model-specific."
+        },
+        "failure_reason": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "qa_id",
+        "model_variant",
+        "status",
+        "predicted_answer_ids",
+        "answer_scores"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "ok"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "predicted_answer_ids": {
+                "minItems": 1
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "enum": [
+                  "retrieval_miss",
+                  "no_candidates",
+                  "model_error"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "predicted_answer_ids": {
+                "maxItems": 0
+              }
+            },
+            "required": [
+              "failure_reason"
+            ]
+          }
+        }
+      ],
+      "additionalProperties": false
+    },
+    "run_metadata": {
+      "type": "object",
+      "description": "Provenance and measurement record for one training or evaluation run.",
+      "properties": {
+        "run_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO 8601 timestamp with timezone."
+        },
+        "config": {
+          "type": "object",
+          "description": "Resolved configuration used by the run."
+        },
+        "seed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "code_revision": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Code commit or other immutable source revision."
+        },
+        "data_manifest": {
+          "type": "object",
+          "properties": {
+            "dataset_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "version": {
+              "type": "string",
+              "minLength": 1
+            },
+            "checksum_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-fA-F]{64}$"
+            }
+          },
+          "required": [
+            "dataset_id",
+            "version",
+            "checksum_sha256"
+          ],
+          "additionalProperties": false
+        },
+        "split": {
+          "enum": [
+            "train",
+            "validation",
+            "test"
+          ]
+        },
+        "model_variant": {
+          "type": "string",
+          "minLength": 1
+        },
+        "metrics": {
+          "type": "object",
+          "description": "Named numeric metrics; breakdowns may be nested by query category."
+        },
+        "measurement_conditions": {
+          "type": "object",
+          "description": "Conditions needed to interpret timing and memory measurements.",
+          "properties": {
+            "device": {
+              "type": "string",
+              "minLength": 1
+            },
+            "batch_size": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "warmup_iterations": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "latency_unit": {
+              "type": "string",
+              "minLength": 1
+            },
+            "memory_unit": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false
+        },
+        "checkpoint_location": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "run_id",
+        "created_at",
+        "config",
+        "seed",
+        "code_revision",
+        "data_manifest",
+        "split",
+        "model_variant",
+        "metrics",
+        "measurement_conditions"
+      ],
+      "additionalProperties": false
+    }
+  }
+}
