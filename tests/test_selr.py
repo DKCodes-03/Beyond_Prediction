@@ -132,6 +132,34 @@ def test_selr_modules_preserve_masks_shapes_and_backpropagate():
         )
 
 
+def test_selr_without_learned_bottleneck_uses_masked_mean_pooling():
+    torch.manual_seed(41)
+    model = SELRAnswerModel(
+        encoder_dim=4,
+        latent_dim=3,
+        max_steps=2,
+        bottleneck_enabled=False,
+    )
+    batch = {
+        "encoder_memory": torch.randn(2, 3, 4),
+        "encoder_memory_mask": torch.tensor(
+            [[True, True, False], [True, True, True]]
+        ),
+        "candidate_embeddings": torch.randn(2, 2, 4),
+        "candidate_mask": torch.tensor([[True, True], [True, False]]),
+        "answer_targets": torch.tensor([[1.0, 0.0], [1.0, 0.0]]),
+    }
+
+    logits = model(batch)
+    logits.sum().backward()
+
+    assert model.bottleneck is None
+    assert torch.isfinite(logits).all()
+    assert model.mean_pool_projection is not None
+    assert model.mean_pool_projection.weight.grad is not None
+    assert model.model_metadata()["bottleneck_ablation"] == "masked_mean_pool"
+
+
 def test_optional_explanation_decoder_preserves_answer_only_forward():
     torch.manual_seed(29)
     model = SELRAnswerModel(encoder_dim=4, latent_dim=3, max_steps=2)

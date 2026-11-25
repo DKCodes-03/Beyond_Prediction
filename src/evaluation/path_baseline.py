@@ -19,6 +19,13 @@ def graph_path_sanity_baseline(
     labels, and is intended as a graph/QA sanity check rather than a learned
     baseline.
     """
+    relation_values = (
+        qa_record.get("relation_sequence")
+        if isinstance(qa_record, Mapping)
+        else None
+    )
+    if not isinstance(relation_values, (list, tuple)) or not relation_values:
+        raise ValueError("graph path sanity baseline requires one or two relations")
     query = _validate_query(qa_record)
     frontier: dict[str, tuple[str, ...]] = {
         seed_id: () for seed_id in query["seed_entity_ids"]

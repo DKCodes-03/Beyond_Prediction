@@ -19,6 +19,15 @@ from src.evaluation.integration_benchmark import (  # noqa: E402
     benchmark_optional_integrations,
     run_integration_benchmark,
 )
+from src.evaluation.benchmark_verification import (  # noqa: E402
+    independently_verify_benchmark,
+    run_benchmark_verification,
+)
+from src.ingestion.split_generation import (  # noqa: E402
+    create_disjoint_benchmark_splits,
+    prepare_disjoint_benchmark_splits,
+    run_benchmark_split_preparation,
+)
 
 
 _SPLITS = frozenset({"train", "validation", "test"})

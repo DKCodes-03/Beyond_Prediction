@@ -221,11 +221,12 @@ __marimo__/
 
 # Local research data and generated experiment artifacts
 /data/raw/**
-!/data/raw/**/
-!/data/raw/**/.gitkeep
+!/data/raw/
+!/data/raw/icews14/
+!/data/raw/icews14/.gitkeep
 /data/processed/**
-!/data/processed/**/
-!/data/processed/**/.gitkeep
+!/data/processed/
+!/data/processed/.gitkeep
 /data/splits/**
 !/data/splits/
 !/data/splits/.gitkeep

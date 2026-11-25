@@ -182,7 +182,8 @@
           "properties": {
             "enabled": { "type": "boolean" },
             "latent_dim": { "type": "integer", "minimum": 1 },
-            "max_steps": { "type": "integer", "minimum": 1 }
+            "max_steps": { "type": "integer", "minimum": 1 },
+            "bottleneck_enabled": { "type": "boolean" }
           },
           "additionalProperties": false
         }

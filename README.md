@@ -42,8 +42,8 @@ for the first experiment.
 | Location | Purpose |
 | --- | --- |
 | `configs/` | Dataset, retrieval, model, and training settings |
-| `data/raw/` | Local source datasets |
-| `data/processed/` | Generated triples, graphs, retrieval caches, and embeddings |
+| `data/raw/` | Untouched local source datasets |
+| `data/processed/` | Canonical facts and provenance manifest used to build the temporal graph |
 | `data/splits/` | Generated train, validation, and test QA records |
 | `src/ingestion/` | Structured loaders and preprocessing |
 | `src/graph/` | Temporal graph construction and optional Neo4j adapter |
@@ -54,15 +54,15 @@ for the first experiment.
 | `src/training/` | Answer-first SELR training and later QLoRA |
 | `src/evaluation/` | Answer, explanation, and baseline evaluation |
 | `src/utils/` | Logging, reproducibility, and checkpoint support |
-| `notebooks/` | Empty exploration and analysis notebooks |
+| `notebooks/` | Dataset exploration, graph inspection, and experiment notebooks |
 | `checkpoints/` | Local SELR, QLoRA, and selected model artifacts |
 | `outputs/` | Local experiments, logs, figures, and reports |
 | `tests/` | CPU temporal fixture and graph, retrieval, SELR, and pipeline tests |
 
-See [plan.md](plan.md) for scope, design, and success criteria, and
-[tasks.md](tasks.md) for the phased implementation checklist.
-See [project_details.md](project_details.md) for the current project direction
-and the rationale behind key choices.
+The MVP keeps the data layout to `raw/`, `processed/`, and `splits/`.
+Preprocessing standardizes facts directly into processed artifacts; separate
+interim tables, persistent embeddings, and retrieval caches are deferred until
+the pipeline needs them.
 
 The Phase 0 record contracts for canonical facts, QA records, retrieved
 subgraphs, model outputs, and run metadata are defined in
@@ -101,6 +101,18 @@ Alternatively, create the Conda environment from the repository root:
 conda env create -f environment.yml
 conda activate beyond-prediction
 ```
+
+For interactive dataset exploration, install the optional notebook dependencies
+in the same environment:
+
+```powershell
+python -m pip install pandas matplotlib ipykernel
+```
+
+Open `notebooks/dataset_exploration.ipynb` in a notebook-enabled editor and
+select that environment. It reads the local ICEWS14 archive described below,
+does not load held-out QA labels, and does not write processed artifacts. Its
+sampled retrieval diagnostics are exploratory, not benchmark results.
 
 Run this CPU smoke check to verify imports, PyTorch autograd/NumPy
 interoperability, and a directed NetworkX path:
@@ -233,8 +245,7 @@ tracked by Git.
 ### Task 35 frozen learned-model comparison
 
 Before SELR experiments, the numeric targets and comparison protocol were
-frozen in [`project_details.md`](project_details.md#frozen-task-35-baseline-versus-selr-protocol):
-across paired seeds 17, 23, and 42, target at least a 0.05 (5 percentage-point)
+frozen across paired seeds 17, 23, and 42: target at least a 0.05 (5 percentage-point)
 improvement in mean test exact match and no more than 2.0x baseline p95
 inference latency.
 The comparison is limited to the exact 2,000-fact pilot artifacts above; it is
@@ -448,7 +459,8 @@ official GPTQ-Int4 variant. A Colab Tesla T4 successfully ran its NF4 4-bit
 inference smoke test (1.67 seconds; 5.19 GiB peak PyTorch-allocated VRAM).
 There is still no demonstrated research need to justify integration, so
 Qwen/QLoRA remains deferred. The full run details and limitations are in
-`outputs/reports/task55_qwen_validation.md`.
+`outputs/reports/task55_qwen_validation.md`. The smoke-test cells and saved
+outputs are in `notebooks/qwen_4bit_smoke_test.ipynb`.
 
 ### Task 56 opt-in Qwen/QLoRA integration
 
@@ -472,6 +484,164 @@ ICEWS14.
 Run metadata can be created and written as JSON with
 `create_run_metadata(...)` and `write_run_metadata(...)` from
 `src/utils/logging_utils.py`.
+
+### Phase 6 benchmark artifacts and training (Tasks 62-66)
+
+Regenerate the deterministic ICEWS14 scale samples from the locally downloaded
+TFLEX archive. The export contains 5K, 10K, and 20K canonical facts and their
+graph-derived QA, plus a manifest with source checksums, sampling seeds, and
+artifact hashes:
+
+```powershell
+@'
+import hashlib
+from pathlib import Path
+from src.ingestion.json_loader import load_icews14_facts
+from src.evaluation.synthetic_benchmark import run_fact_scale_sample_preparation
+
+archive = Path("data/raw/icews14/tflex_icews14_all.zip")
+metadata = Path("data/raw/icews14/tflex_icews14_meta.json")
+run_fact_scale_sample_preparation(
+    raw_facts=load_icews14_facts(archive, metadata),
+    output_dir="outputs/experiments/task62_fact_scale_samples",
+    fact_sampling_seed=17,
+    qa_seed=61,
+    max_hops=2,
+    dataset={
+        "id": "ICEWS14",
+        "source": "huggingface:linxy/ICEWS14",
+        "revision": "462141693b1c9c2ece49384fab41955eae89471a",
+        "archive_sha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
+        "metadata_sha256": hashlib.sha256(metadata.read_bytes()).hexdigest(),
+    },
+)
+'@ | .\.venv\Scripts\python.exe -
+```
+
+Independent verification can be run over each sample. Compact mode streams QA
+records and retains aggregate answer-set, temporal-boundary,
+candidate/evidence-coverage, and graph-path metrics without storing per-QA path
+details:
+
+```powershell
+.\.venv\Scripts\python.exe -m src.evaluation.verify_scale_samples
+```
+
+Verification completed for all 1,229,219 scale QA records and the 543-record
+hard-synthetic benchmark. Answer sets, temporal boundaries, supporting evidence,
+and graph-path sanity were 100% across the scale samples. Candidate recall was
+100% at 5K, 99.985% at 10K, and 98.975% at 20K, where retrieval limits reduce
+candidate coverage. Aggregate reports are saved under
+`outputs/experiments/task63_benchmark_verification/`.
+
+The hard-synthetic benchmark and disjoint splits used for the pilot and repeated
+runs are saved under
+`outputs/experiments/task61_hard_synthetic/` and
+`outputs/experiments/task64_hard_synthetic_splits/`. Task 64 excludes overlap
+with the earlier pilot-test QA, path, and query signatures. Regenerate those
+artifacts with:
+
+```powershell
+@'
+import hashlib
+import json
+from pathlib import Path
+from src.evaluation.synthetic_benchmark import (
+    generate_harder_synthetic_benchmark,
+    run_synthetic_benchmark,
+)
+from src.ingestion.split_generation import run_benchmark_split_preparation
+
+benchmark = generate_harder_synthetic_benchmark(
+    seed=61, seed_count=4, branches=3, max_hops=4
+)
+run_synthetic_benchmark(
+    output_dir="outputs/experiments/task61_hard_synthetic",
+    facts=benchmark["facts"],
+    qa_records=benchmark["qa_records"],
+    seed=61,
+)
+destination = Path("outputs/experiments/task64_hard_synthetic_splits")
+destination.mkdir(parents=True, exist_ok=True)
+for name, records in (
+    ("facts.json", benchmark["facts"]),
+    ("qa_records.json", benchmark["qa_records"]),
+):
+    (destination / name).write_text(
+        json.dumps(records, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+split_result = run_benchmark_split_preparation(
+    qa_records=benchmark["qa_records"],
+    output_dir=destination,
+    seed=64,
+    pilot_test_records=json.loads(
+        Path("data/splits/test.json").read_text(encoding="utf-8")
+    ),
+    benchmark="hard_synthetic_task66",
+)
+artifacts = [
+    "facts.json", "qa_records.json", "train.json", "val.json", "test.json",
+    "benchmark_splits_manifest.json",
+]
+manifest = {
+    "benchmark": "hard_synthetic_task66",
+    "generator": {"seed": 61, "seed_count": 4, "branches": 3, "max_hops": 4},
+    "fact_count": len(benchmark["facts"]),
+    "qa_count": len(benchmark["qa_records"]),
+    "artifacts": {
+        name: {
+            "sha256": hashlib.sha256((destination / name).read_bytes()).hexdigest()
+        }
+        for name in artifacts
+    },
+    "split_manifest": split_result,
+}
+(destination / "task64_artifacts.json").write_text(
+    json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+    encoding="utf-8",
+)
+'@ | .\.venv\Scripts\python.exe -
+```
+
+The Task 65 pilot trains all configurations using only train and validation
+files:
+
+```powershell
+.\.venv\Scripts\python.exe -m src.evaluation.ablation_training `
+  --facts outputs/experiments/task64_hard_synthetic_splits/facts.json `
+  --train-split outputs/experiments/task64_hard_synthetic_splits/train.json `
+  --validation-split outputs/experiments/task64_hard_synthetic_splits/val.json `
+  --max-hops 4 `
+  --output-dir outputs/experiments/task65_hard_synthetic_pilot `
+  --seed 61
+```
+
+Task 66 reads the validation-selected configuration list from the Task 65
+manifest and fits each configuration with the same three paired seeds. It
+selects each checkpoint using validation exact match and does not accept or read
+a test-split path:
+
+```powershell
+.\.venv\Scripts\python.exe -m src.evaluation.ablation_training `
+  --facts outputs/experiments/task64_hard_synthetic_splits/facts.json `
+  --train-split outputs/experiments/task64_hard_synthetic_splits/train.json `
+  --validation-split outputs/experiments/task64_hard_synthetic_splits/val.json `
+  --max-hops 4 `
+  --pilot-results outputs/experiments/task65_hard_synthetic_pilot/pilot_results.json `
+  --output-dir outputs/experiments/task66_repeated_training `
+  --seeds 17 23 42
+```
+
+The Task 65 validation exact match was 1.0 for the baseline, standard SELR,
+latent-step variants, and the bottleneck ablation; ties selected the 1-step
+latent variant. Task 66 completed 12 runs (four configurations × three seeds),
+all at validation exact match 1.0, with early stopping within 12 seconds per
+run. The bottleneck-disabled variant uses masked mean pooling in place of
+learned latent-slot cross-attention. These results are on 54 validation
+questions in a controlled synthetic benchmark and are not test or
+natural-language generalization results. Reports and checkpoints are saved in
+the corresponding `outputs/experiments/task65_*` and `task66_*` directories.
 
 No datasets, weights, credentials, or experiment results are tracked in Git.
 ICEWS14 is downloaded locally and excluded from Git.
@@ -602,5 +772,8 @@ can favor frequent entities/relations and omit ambiguity in the source data.
 Report these synthetic-template limitations and keep query/path instances
 disjoint across splits.
 
-Generated data, checkpoints, and outputs are ignored by Git; `.gitkeep` files
-preserve the directory layout. Do not commit downloaded datasets or credentials.
+Raw source files and generated data, checkpoints, and outputs are ignored by
+Git; `.gitkeep` files preserve the MVP `data/raw/`, `data/processed/`, and
+`data/splits/` directories. Separate interim tables, persistent embeddings and
+retrieval caches, and TimelineKGQA data are deferred. Do not commit downloaded
+datasets or credentials.

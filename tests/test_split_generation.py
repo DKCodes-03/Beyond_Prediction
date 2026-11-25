@@ -2,7 +2,12 @@ import json
 
 import pytest
 
-from src.ingestion.split_generation import split_qa_records, write_qa_splits
+from src.ingestion.split_generation import (
+    create_disjoint_benchmark_splits,
+    run_benchmark_split_preparation,
+    split_qa_records,
+    write_qa_splits,
+)
 
 
 def _records():
@@ -121,3 +126,49 @@ def test_split_qa_records_validates_fraction_sum():
             _records(),
             fractions={"train": 0.7, "validation": 0.1, "test": 0.1},
         )
+
+
+def test_benchmark_splits_exclude_pilot_overlap_and_export(tmp_path):
+    records = [
+        {
+            **record,
+            "split": "old",
+            "seed_entity_ids": [f"seed:{index}"],
+            "relation_sequence": [f"r{index}"],
+            "accepted_answer_ids": [f"answer:{index}"],
+        }
+        for index, record in enumerate(_records())
+    ]
+    pilot_test = [records[0]]
+
+    splits = create_disjoint_benchmark_splits(
+        records,
+        seed=17,
+        pilot_test_records=pilot_test,
+    )
+
+    assert "split" in splits["train"][0]
+    all_ids = [
+        record["qa_id"]
+        for split_records in splits.values()
+        for record in split_records
+    ]
+    assert pilot_test[0]["qa_id"] not in all_ids
+    assert len(all_ids) == len(set(all_ids))
+
+    result = run_benchmark_split_preparation(
+        qa_records=records,
+        output_dir=tmp_path,
+        seed=17,
+        pilot_test_records=pilot_test,
+    )
+    assert (tmp_path / "train.json").is_file()
+    assert (tmp_path / "val.json").is_file()
+    assert (tmp_path / "test.json").is_file()
+    assert (tmp_path / "benchmark_splits_manifest.json").is_file()
+    manifest = json.loads(
+        (tmp_path / "benchmark_splits_manifest.json").read_text(encoding="utf-8")
+    )
+    assert manifest["input_qa_count"] == len(records)
+    assert manifest["excluded_qa_count"] == 2
+    assert result["disjoint"] is True

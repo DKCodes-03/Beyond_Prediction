@@ -148,6 +148,159 @@ def write_qa_splits(
         )
 
 
+def create_disjoint_benchmark_splits(
+    records: Iterable[Mapping[str, Any]],
+    fractions: Mapping[str, float] | None = None,
+    seed: int = 17,
+    *,
+    excluded_qa_records: Iterable[Mapping[str, Any]] | None = None,
+    excluded_qa_ids: Iterable[str] | None = None,
+    pilot_test_records: Iterable[Mapping[str, Any]] | None = None,
+    excluded_records: Iterable[Mapping[str, Any]] | None = None,
+    pilot_test_qa_records: Iterable[Mapping[str, Any]] | None = None,
+    exclude_qa_ids: Iterable[str] | None = None,
+    split_seed: int | None = None,
+) -> dict[str, list[dict[str, Any]]]:
+    """Create benchmark splits after removing pilot-overlapping instances.
+
+    Overlap is checked by QA ID, witness-path facts, and the complete query
+    signature. The remaining records are assigned with the shared path-disjoint
+    split implementation, so no supporting-path instance is shared between
+    train, validation, and test.
+    """
+    if split_seed is not None:
+        seed = split_seed
+    normalized = list(records)
+    excluded_sources: list[Iterable[Mapping[str, Any]]] = []
+    if excluded_qa_records is not None:
+        excluded_sources.append(excluded_qa_records)
+    if excluded_records is not None:
+        excluded_sources.append(excluded_records)
+    if pilot_test_records is not None:
+        excluded_sources.append(pilot_test_records)
+    if pilot_test_qa_records is not None:
+        excluded_sources.append(pilot_test_qa_records)
+
+    excluded_keys: set[tuple[Any, ...]] = set()
+    excluded_ids: set[str] = set(excluded_qa_ids or [])
+    excluded_ids.update(exclude_qa_ids or [])
+    for source in excluded_sources:
+        for record in source:
+            if not isinstance(record, Mapping):
+                raise ValueError("excluded QA records must be mappings")
+            qa_id = record.get("qa_id")
+            if isinstance(qa_id, str):
+                excluded_ids.add(qa_id)
+            excluded_keys.update(_overlap_keys(record))
+
+    eligible: list[dict[str, Any]] = []
+    for index, record in enumerate(normalized):
+        if not isinstance(record, Mapping):
+            raise ValueError(f"QA record {index}: expected a mapping")
+        qa_id = record.get("qa_id")
+        if isinstance(qa_id, str) and qa_id in excluded_ids:
+            continue
+        if _overlap_keys(record).intersection(excluded_keys):
+            continue
+        eligible_record = dict(record)
+        eligible_record.pop("split", None)
+        eligible.append(eligible_record)
+
+    splits = split_qa_records(eligible, fractions=fractions, seed=seed)
+    _verify_benchmark_split_disjointness(splits)
+    return splits
+
+
+def prepare_disjoint_benchmark_splits(
+    records: Iterable[Mapping[str, Any]],
+    fractions: Mapping[str, float] | None = None,
+    seed: int = 17,
+    **kwargs: Any,
+) -> dict[str, list[dict[str, Any]]]:
+    """Descriptive alias for :func:`create_disjoint_benchmark_splits`."""
+    return create_disjoint_benchmark_splits(
+        records,
+        fractions=fractions,
+        seed=seed,
+        **kwargs,
+    )
+
+
+def run_benchmark_split_preparation(
+    *,
+    qa_records: Iterable[Mapping[str, Any]],
+    output_dir: str | Path,
+    fractions: Mapping[str, float] | None = None,
+    seed: int = 17,
+    excluded_qa_records: Iterable[Mapping[str, Any]] | None = None,
+    excluded_qa_ids: Iterable[str] | None = None,
+    pilot_test_records: Iterable[Mapping[str, Any]] | None = None,
+    excluded_records: Iterable[Mapping[str, Any]] | None = None,
+    pilot_test_qa_records: Iterable[Mapping[str, Any]] | None = None,
+    exclude_qa_ids: Iterable[str] | None = None,
+    split_seed: int | None = None,
+    benchmark: str = "hard_synthetic",
+) -> dict[str, Any]:
+    """Filter pilot overlap, create three splits, and export them atomically."""
+    if split_seed is not None:
+        seed = split_seed
+    if isinstance(seed, bool) or not isinstance(seed, int) or seed < 0:
+        raise ValueError("seed must be a non-negative integer")
+    all_records = list(qa_records)
+    splits = create_disjoint_benchmark_splits(
+        all_records,
+        fractions=fractions,
+        seed=seed,
+        excluded_qa_records=excluded_qa_records,
+        excluded_qa_ids=excluded_qa_ids,
+        pilot_test_records=pilot_test_records,
+        excluded_records=excluded_records,
+        pilot_test_qa_records=pilot_test_qa_records,
+        exclude_qa_ids=exclude_qa_ids,
+    )
+
+    destination = Path(output_dir)
+    destination.mkdir(parents=True, exist_ok=True)
+    write_qa_splits(splits, destination)
+
+    manifest = {
+        "benchmark": benchmark,
+        "status": "prepared",
+        "seed": seed,
+        "fractions": dict(fractions or _DEFAULT_FRACTIONS),
+        "input_qa_count": len(all_records),
+        "split_counts": {
+            split: len(records)
+            for split, records in splits.items()
+        },
+        "excluded_qa_count": len(all_records) - sum(
+            len(records) for records in splits.values()
+        ),
+        "disjoint": True,
+        "test_reserved_for_final_evaluation": True,
+        "pilot_test_overlap_excluded": True,
+        "artifacts": {
+            "train": "train.json",
+            "validation": "val.json",
+            "test": "test.json",
+        },
+    }
+    manifest_path = destination / "benchmark_splits_manifest.json"
+    temporary = manifest_path.with_name(".benchmark_splits_manifest.json.tmp")
+    temporary.write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    temporary.replace(manifest_path)
+    return {
+        "manifest_path": str(manifest_path),
+        "benchmark": benchmark,
+        "status": "prepared",
+        "split_counts": manifest["split_counts"],
+        "disjoint": True,
+    }
+
+
 def _validate_fractions(
     fractions: Mapping[str, float] | None,
 ) -> dict[str, float]:
@@ -203,3 +356,71 @@ def _path_signature(record: Mapping[str, Any], qa_id: str) -> tuple[str, ...]:
             "non-empty list of fact IDs"
         )
     return tuple(fact_id.strip() for fact_id in path)
+
+
+def _overlap_keys(record: Mapping[str, Any]) -> set[tuple[Any, ...]]:
+    """Return exact-instance signatures used to reject benchmark overlap."""
+    keys: set[tuple[Any, ...]] = set()
+    qa_id = record.get("qa_id")
+    if isinstance(qa_id, str) and qa_id:
+        keys.add(("qa_id", qa_id))
+
+    path = record.get("supporting_path_fact_ids")
+    if isinstance(path, list) and path:
+        keys.add(("path", tuple(path)))
+
+    constraint = record.get("temporal_constraint")
+    cutoff = constraint.get("cutoff_date") if isinstance(constraint, Mapping) else None
+    seeds = record.get("seed_entity_ids")
+    relations = record.get("relation_sequence")
+    answers = record.get("accepted_answer_ids")
+    if (
+        isinstance(seeds, list)
+        and isinstance(relations, list)
+        and isinstance(answers, list)
+        and isinstance(cutoff, str)
+    ):
+        keys.add(
+            (
+                "query",
+                tuple(seeds),
+                tuple(relations),
+                cutoff,
+                tuple(sorted(answers)),
+            )
+        )
+    return keys
+
+
+def _verify_benchmark_split_disjointness(
+    splits: Mapping[str, Iterable[Mapping[str, Any]]],
+) -> None:
+    qa_ids: dict[str, set[str]] = {}
+    path_signatures: dict[str, set[tuple[str, ...]]] = {}
+    query_signatures: dict[str, set[tuple[Any, ...]]] = {}
+
+    for split in _SPLIT_NAMES:
+        qa_ids[split] = set()
+        path_signatures[split] = set()
+        query_signatures[split] = set()
+        for record in splits[split]:
+            qa_id = record["qa_id"]
+            qa_ids[split].add(qa_id)
+            path_signatures[split].add(_path_signature(record, qa_id))
+            query_signatures[split].update(_overlap_keys(record))
+
+    for left_index, left in enumerate(_SPLIT_NAMES):
+        for right in _SPLIT_NAMES[left_index + 1:]:
+            if qa_ids[left].intersection(qa_ids[right]):
+                raise ValueError("train/validation/test QA IDs must be disjoint")
+            if path_signatures[left].intersection(path_signatures[right]):
+                raise ValueError("train/validation/test witness paths must be disjoint")
+            if query_signatures[left].intersection(query_signatures[right]):
+                raise ValueError("train/validation/test query instances must be disjoint")
+
+
+split_benchmark_qa_records = create_disjoint_benchmark_splits
+create_benchmark_splits = create_disjoint_benchmark_splits
+split_new_benchmark = create_disjoint_benchmark_splits
+create_disjoint_splits = create_disjoint_benchmark_splits
+prepare_new_benchmark_splits = create_disjoint_benchmark_splits

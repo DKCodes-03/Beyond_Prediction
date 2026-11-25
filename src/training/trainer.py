@@ -43,15 +43,26 @@ class SELRAnswerModel(nn.Module):
         latent_dim: int,
         max_steps: int,
         hidden_dim: int | None = None,
+        bottleneck_enabled: bool = True,
     ) -> None:
         super().__init__()
         self.encoder_dim = _positive_int(encoder_dim, "encoder_dim")
         self.latent_dim = _positive_int(latent_dim, "latent_dim")
         self.max_steps = _positive_int(max_steps, "max_steps")
+        if not isinstance(bottleneck_enabled, bool):
+            raise ValueError("bottleneck_enabled must be a boolean")
+        self.bottleneck_enabled = bottleneck_enabled
         if hidden_dim is not None:
             _positive_int(hidden_dim, "hidden_dim")
-        self.bottleneck = LatentBottleneck(
-            self.encoder_dim, self.latent_dim, self.max_steps
+        self.bottleneck = (
+            LatentBottleneck(self.encoder_dim, self.latent_dim, self.max_steps)
+            if bottleneck_enabled
+            else None
+        )
+        self.mean_pool_projection = (
+            None
+            if bottleneck_enabled
+            else nn.Linear(self.encoder_dim, self.latent_dim)
         )
         self.reasoner = LatentReasoner(self.latent_dim, self.max_steps)
         self.answer_head = ReasoningHead(
@@ -113,9 +124,24 @@ class SELRAnswerModel(nn.Module):
         return answer_logits, token_logits
 
     def _reason(self, inputs: Mapping[str, Tensor]) -> tuple[Tensor, Tensor]:
-        latent_states, latent_mask = self.bottleneck(
-            inputs["encoder_memory"], inputs["encoder_memory_mask"]
-        )
+        if self.bottleneck is not None:
+            latent_states, latent_mask = self.bottleneck(
+                inputs["encoder_memory"], inputs["encoder_memory_mask"]
+            )
+        else:
+            memory = inputs["encoder_memory"]
+            memory_mask = inputs["encoder_memory_mask"]
+            weights = memory_mask.unsqueeze(-1).to(memory.dtype)
+            pooled = (memory * weights).sum(dim=1) / weights.sum(dim=1).clamp_min(1)
+            projection = self.mean_pool_projection
+            if projection is None:
+                raise RuntimeError("mean-pool projection is missing")
+            latent_states = projection(pooled).unsqueeze(1)
+            latent_mask = torch.ones(
+                (memory.shape[0], 1),
+                dtype=torch.bool,
+                device=memory.device,
+            )
         return self.reasoner(latent_states, latent_mask)
 
     def model_metadata(self) -> dict[str, Any]:
@@ -127,6 +153,9 @@ class SELRAnswerModel(nn.Module):
             "max_steps": self.max_steps,
             "hidden_dim": self.answer_head.hidden_dim,
         }
+        if not self.bottleneck_enabled:
+            metadata["bottleneck_enabled"] = False
+            metadata["bottleneck_ablation"] = "masked_mean_pool"
         if self._explanation_metadata is not None:
             metadata["explanation_decoder"] = dict(self._explanation_metadata)
         return metadata

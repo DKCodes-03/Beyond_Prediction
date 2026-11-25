@@ -296,7 +296,14 @@ def run_selr_training(
     trained. QLoRA and explanation training are not part of this entry point.
     """
     training = _validate_training_config(training_config)
-    encoder_dim, dropout, latent_dim, max_steps, max_candidates = (
+    (
+        encoder_dim,
+        dropout,
+        latent_dim,
+        max_steps,
+        max_candidates,
+        bottleneck_enabled,
+    ) = (
         _validate_model_config(model_config)
     )
     retrieval_settings = _retrieval_settings(retrieval_config)
@@ -356,6 +363,7 @@ def run_selr_training(
         encoder_dim=encoder_dim,
         latent_dim=latent_dim,
         max_steps=max_steps,
+        bottleneck_enabled=bottleneck_enabled,
     )
     return train_selr(
         model,
@@ -543,7 +551,7 @@ def _validate_training_config(config: Mapping[str, Any]) -> dict[str, Any]:
 
 def _validate_model_config(
     config: Mapping[str, Any],
-) -> tuple[int, float, int, int, int]:
+) -> tuple[int, float, int, int, int, bool]:
     if not isinstance(config, Mapping):
         raise ValueError("model config must be a mapping")
     if config.get("variant") != "selr":
@@ -564,6 +572,9 @@ def _validate_model_config(
     embedding_dim = _positive_int(encoder.get("embedding_dim"), "encoder.embedding_dim")
     latent_dim = _positive_int(selr.get("latent_dim"), "selr.latent_dim")
     max_steps = _positive_int(selr.get("max_steps"), "selr.max_steps")
+    bottleneck_enabled = selr.get("bottleneck_enabled", True)
+    if not isinstance(bottleneck_enabled, bool):
+        raise ValueError("selr.bottleneck_enabled must be a boolean")
     max_candidates = _positive_int(
         answer_head.get("max_candidates"), "answer_head.max_candidates"
     )
@@ -572,7 +583,14 @@ def _validate_model_config(
         raise ValueError("encoder.dropout must be a number between 0 and 1")
     if not 0 <= dropout <= 1:
         raise ValueError("encoder.dropout must be a number between 0 and 1")
-    return embedding_dim, float(dropout), latent_dim, max_steps, max_candidates
+    return (
+        embedding_dim,
+        float(dropout),
+        latent_dim,
+        max_steps,
+        max_candidates,
+        bottleneck_enabled,
+    )
 
 
 def _retrieval_settings(config: Mapping[str, Any]) -> dict[str, Any]:

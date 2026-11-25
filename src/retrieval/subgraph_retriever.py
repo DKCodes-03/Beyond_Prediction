@@ -149,8 +149,8 @@ def _validate_query(qa_record: Mapping[str, Any]) -> dict[str, Any]:
     relation_values = qa_record.get("relation_sequence")
     if not isinstance(relation_values, (list, tuple)) or not 1 <= len(
         relation_values
-    ) <= 2:
-        raise ValueError("qa_record relation_sequence must contain one or two relations")
+    ) <= 8:
+        raise ValueError("qa_record relation_sequence must contain between one and eight relations")
     relation_sequence = tuple(
         canonical_id(value, "relation_id") for value in relation_values
     )
@@ -176,7 +176,7 @@ def _validate_settings(
     if values["strategy"] != "relation_constrained_bfs":
         raise ValueError("strategy must be 'relation_constrained_bfs'")
     for name, minimum, maximum in (
-        ("max_hops", 1, 2),
+        ("max_hops", 1, 8),
         ("max_nodes", 1, None),
         ("max_edges", 0, None),
     ):

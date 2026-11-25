@@ -22,8 +22,10 @@ def prepare_qa(
     facts: Iterable[Mapping[str, Any]],
     entity_labels: Mapping[str, str] | None = None,
     relation_labels: Mapping[str, str] | None = None,
+    *,
+    max_hops: int = 2,
 ) -> list[dict[str, Any]]:
-    """Create one- and two-hop QA queries from canonical temporal facts.
+    """Create graph-derived QA queries up to ``max_hops`` hops.
 
     Each candidate query uses the latest timestamp on one of its supporting
     paths as its inclusive cutoff. Answers include every unique endpoint
@@ -31,6 +33,11 @@ def prepare_qa(
     IDs plus a deterministic witness path. Split assignment is left to the
     later split-generation stage.
     """
+    if isinstance(max_hops, bool) or not isinstance(max_hops, int):
+        raise ValueError("max_hops must be an integer >= 1")
+    if max_hops < 1:
+        raise ValueError("max_hops must be an integer >= 1")
+
     normalized_facts, inferred_entities, inferred_relations = _validate_facts(facts)
     entities = _merge_labels(inferred_entities, entity_labels, "entity")
     relations = _merge_labels(inferred_relations, relation_labels, "relation")
@@ -45,21 +52,13 @@ def prepare_qa(
 
     candidates: set[tuple[str, tuple[str, ...], str]] = set()
     for first in normalized_facts:
-        candidates.add(
-            (
-                first["subject_id"],
-                (first["relation_id"],),
-                first["timestamp"],
-            )
+        _extend_candidates(
+            outgoing,
+            first["subject_id"],
+            (first,),
+            max_hops,
+            candidates,
         )
-        for second in by_subject.get(first["object_id"], []):
-            candidates.add(
-                (
-                    first["subject_id"],
-                    (first["relation_id"], second["relation_id"]),
-                    max(first["timestamp"], second["timestamp"]),
-                )
-            )
 
     qa_records = []
     for seed, relation_sequence, cutoff in sorted(candidates):
@@ -79,7 +78,13 @@ def prepare_qa(
                 f"{seed!r}, {relation_sequence!r}, {cutoff!r}"
             )
 
-        template_id = "one_hop" if len(relation_sequence) == 1 else "two_hop"
+        template_id = (
+            "one_hop"
+            if len(relation_sequence) == 1
+            else "two_hop"
+            if len(relation_sequence) == 2
+            else f"{len(relation_sequence)}_hop"
+        )
         qa_records.append(
             {
                 "qa_id": _qa_id(seed, relation_sequence, cutoff),
@@ -202,24 +207,25 @@ def _matching_paths(
     relation_sequence: tuple[str, ...],
     cutoff: str,
 ) -> Iterable[tuple[dict[str, str], ...]]:
-    first_edges = [
-        fact
-        for fact in outgoing.get((seed, relation_sequence[0]), [])
-        if fact["timestamp"] <= cutoff
-    ]
-    if len(relation_sequence) == 1:
-        yield from ((fact,) for fact in first_edges)
-        return
+    def walk(
+        subject: str,
+        hop: int,
+        path: tuple[dict[str, str], ...],
+    ) -> Iterable[tuple[dict[str, str], ...]]:
+        if hop == len(relation_sequence):
+            yield path
+            return
+        for fact in outgoing.get(
+            (subject, relation_sequence[hop]), []
+        ):
+            if fact["timestamp"] <= cutoff:
+                yield from walk(
+                    fact["object_id"],
+                    hop + 1,
+                    (*path, fact),
+                )
 
-    for first in first_edges:
-        second_edges = outgoing.get(
-            (first["object_id"], relation_sequence[1]), []
-        )
-        yield from (
-            (first, second)
-            for second in second_edges
-            if second["timestamp"] <= cutoff
-        )
+    yield from walk(seed, 0, ())
 
 
 def _qa_id(seed: str, relations: tuple[str, ...], cutoff: str) -> str:
@@ -227,6 +233,34 @@ def _qa_id(seed: str, relations: tuple[str, ...], cutoff: str) -> str:
         [seed, relations, cutoff], ensure_ascii=False, separators=(",", ":")
     )
     return f"qa:{hashlib.sha256(signature.encode('utf-8')).hexdigest()}"
+
+
+def _extend_candidates(
+    outgoing: dict[tuple[str, str], list[dict[str, str]]],
+    seed: str,
+    path: tuple[dict[str, str], ...],
+    max_hops: int,
+    candidates: set[tuple[str, tuple[str, ...], str]],
+) -> None:
+    """Enumerate relation sequences and path cutoffs for bounded graph walks."""
+    relation_sequence = tuple(fact["relation_id"] for fact in path)
+    cutoff = max(fact["timestamp"] for fact in path)
+    candidates.add((seed, relation_sequence, cutoff))
+    if len(path) >= max_hops:
+        return
+
+    tail = path[-1]["object_id"]
+    for (subject_id, relation_id), facts in outgoing.items():
+        if subject_id != tail:
+            continue
+        for fact in facts:
+            _extend_candidates(
+                outgoing,
+                seed,
+                (*path, fact),
+                max_hops,
+                candidates,
+            )
 
 
 def _render_question(
@@ -243,9 +277,18 @@ def _render_question(
             f"Which entity is connected to {subject} by relation {relation} "
             f"on or before {cutoff}?"
         )
-    relation_1 = relation_labels.get(relations[0], relations[0])
-    relation_2 = relation_labels.get(relations[1], relations[1])
+    if len(relations) == 2:
+        relation_1 = relation_labels.get(relations[0], relations[0])
+        relation_2 = relation_labels.get(relations[1], relations[1])
+        return (
+            f"Which entity is reached from {subject} by relation {relation_1} "
+            f"followed by {relation_2}, using facts dated on or before {cutoff}?"
+        )
+    rendered_relations = [
+        relation_labels.get(relation, relation) for relation in relations
+    ]
+    relation_chain = " followed by ".join(rendered_relations)
     return (
-        f"Which entity is reached from {subject} by relation {relation_1} "
-        f"followed by {relation_2}, using facts dated on or before {cutoff}?"
+        f"Which entity is reached from {subject} by relations {relation_chain}, "
+        f"using facts dated on or before {cutoff}?"
     )
